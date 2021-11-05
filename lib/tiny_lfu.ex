@@ -3,67 +3,70 @@ defmodule TinyLfu do
   Documentation for `TinyLfu`.
   """
 
-  defstruct [:window_size, :threshold, :frequency, :door_keeper, :window]
+  defstruct [:frequencies, :sample_rate, :threshold, :window_size, :window]
 
-  alias TinyLfu.{DoorKeeper, Frequency}
+  alias TinyLfu.Frequencies
 
   def new(opts \\ []) do
-    window_size = trunc(Keyword.get(opts, :window_size, 10_000))
-    limit = trunc(Keyword.get(opts, :limit, 100))
+    limit = trunc(Keyword.get(opts, :limit, 50))
+    window_size = trunc(Keyword.get(opts, :window_size, 1_000))
     threshold = trunc(window_size / limit)
+    sample_rate = Keyword.get(opts, :sample_rate, 1.0)
 
-    door_keeper = Keyword.get(opts, :door_keeper, DoorKeeper.Default.new(max_size: window_size))
-
-    frequency =
-      Keyword.get(
-        opts,
-        :frequency,
-        Frequency.Default.new(
-          max_frequency: threshold,
-          max_cardinality: window_size,
-          limit: limit
-        )
+    frequencies =
+      Frequencies.new(
+        max_frequency: threshold,
+        max_cardinality: window_size,
+        limit: limit
       )
 
     %__MODULE__{
-      door_keeper: door_keeper,
-      frequency: frequency,
+      frequencies: frequencies,
+      sample_rate: sample_rate,
       threshold: threshold,
       window: :counters.new(1, []),
       window_size: window_size
     }
   end
 
-  def add(lfu, key) do
-    lfu = if :counters.get(lfu.window, 1) >= lfu.window_size, do: reset(lfu), else: lfu
+  def sample?(lfu, _, sample \\ :rand.uniform())
 
+  def sample?(%__MODULE__{sample_rate: sample_rate}, _key, sample) when sample_rate <= sample,
+    do: false
+
+  def sample?(lfu, key, _sample), do: add?(lfu, key)
+
+  def add?(lfu, key) do
     :counters.add(lfu.window, 1, 1)
 
-    if DoorKeeper.member?(lfu.door_keeper, key) do
-      count = Frequency.count(lfu.frequency, key)
+    if :counters.get(lfu.window, 1) == lfu.window_size, do: reset(lfu)
 
-      if count >= lfu.threshold do
-        {:ok, lfu}
-      else
-        Frequency.increment(lfu.frequency, key)
-        min_count = Frequency.min_count(lfu.frequency)
+    count = Frequencies.count(lfu.frequencies, key)
 
-        if count + 1 > min_count do
-          {:ok, lfu}
-        else
-          {:error, lfu}
-        end
-      end
+    if count >= lfu.threshold do
+      true
     else
-      DoorKeeper.add(lfu.door_keeper, key)
-      {:error, lfu}
+      min_count = Frequencies.min_count(lfu.frequencies)
+
+      cond do
+        min_count >= lfu.threshold ->
+          false
+
+        count > min_count ->
+          Frequencies.put(lfu.frequencies, key)
+          true
+
+        true ->
+          Frequencies.put(lfu.frequencies, key)
+          false
+      end
     end
   end
 
   defp reset(lfu) do
-    frequency = Frequency.reset(lfu.frequency)
-    door_keeper = DoorKeeper.reset(lfu.door_keeper)
+    :ok = Frequencies.reset(lfu.frequencies)
     :counters.put(lfu.window, 1, 0)
-    %__MODULE__{lfu | door_keeper: door_keeper, frequency: frequency}
+
+    :ok
   end
 end

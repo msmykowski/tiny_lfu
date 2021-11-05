@@ -21,7 +21,9 @@ defmodule TinyLfu.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      {:talan, "~> 0.1.1"}
+      {:talan, path: "/Users/msmykowski/sandbox/talan"},
+      {:benchee, "~> 1.0", only: :dev},
+      {:cachex, "~> 3.4", only: :dev}
     ]
   end
 end
