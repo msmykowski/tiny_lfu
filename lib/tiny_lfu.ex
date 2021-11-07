@@ -14,7 +14,7 @@ defmodule TinyLfu do
 
   def new(opts \\ []) do
     limit = trunc(Keyword.get(opts, :limit, 50))
-    window_size = trunc(Keyword.get(opts, :window_size, 1_000))
+    window_size = trunc(Keyword.get(opts, :window_size, 500))
     threshold = trunc(window_size / limit)
     sample_rate = Keyword.get(opts, :sample_rate, 1.0)
 
@@ -37,24 +37,24 @@ defmodule TinyLfu do
   def sample?(lfu, key, _sample), do: add?(lfu, key)
 
   def add?(lfu, key) do
-    Windows.increment_current_window(lfu.windows)
-    count = Windows.get_current_window_count(lfu.windows, key)
+    window = Windows.get_current_window(lfu.windows)
+    count = Windows.get_window_count(lfu.windows, key, window)
 
     if count >= lfu.threshold do
       true
     else
-      min_count = Windows.get_min_count(lfu.windows)
+      min_count = Windows.get_min_count(lfu.windows, window)
 
       cond do
         min_count >= lfu.threshold ->
           false
 
         count > min_count ->
-          Windows.put_in_current_window(lfu.windows, key)
+          Windows.put_in_window(lfu.windows, key, window)
           true
 
         true ->
-          Windows.put_in_current_window(lfu.windows, key)
+          Windows.put_in_window(lfu.windows, key, window)
           false
       end
     end

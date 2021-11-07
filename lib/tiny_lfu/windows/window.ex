@@ -1,5 +1,5 @@
 defmodule TinyLfu.Windows.Window do
-  defstruct [:cardinality, :limit, :state, :bloom_filter, :frequency_counter]
+  defstruct [:cardinality, :index, :limit, :state, :bloom_filter, :frequency_counter]
 
   @state %{
     size: 1,
@@ -9,6 +9,7 @@ defmodule TinyLfu.Windows.Window do
   alias Talan.CountingBloomFilter
 
   def new(opts) do
+    index = Keyword.fetch!(opts, :index)
     limit = Keyword.fetch!(opts, :limit)
     max_frequency = Keyword.fetch!(opts, :max_frequency)
     cardinality = Keyword.fetch!(opts, :cardinality)
@@ -16,6 +17,7 @@ defmodule TinyLfu.Windows.Window do
     %__MODULE__{
       bloom_filter: CountingBloomFilter.new(limit, counters_bit_size: 16),
       cardinality: cardinality,
+      index: index,
       state: :counters.new(length(Map.keys(@state)), [:write_concurrency]),
       frequency_counter: :counters.new(max_frequency, [:write_concurrency]),
       limit: limit
@@ -23,6 +25,8 @@ defmodule TinyLfu.Windows.Window do
   end
 
   def count(window, key), do: CountingBloomFilter.count(window.bloom_filter, key)
+
+  def index(window), do: window.index
 
   def put(window, key) do
     CountingBloomFilter.put(window.bloom_filter, key)
