@@ -3,9 +3,14 @@ defmodule TinyLfu do
   Documentation for `TinyLfu`.
   """
 
-  defstruct [:frequencies, :sample_rate, :threshold, :window_size, :window]
+  defstruct [
+    :limit,
+    :sample_rate,
+    :threshold,
+    :windows
+  ]
 
-  alias TinyLfu.Frequencies
+  alias TinyLfu.Windows
 
   def new(opts \\ []) do
     limit = trunc(Keyword.get(opts, :limit, 50))
@@ -13,19 +18,14 @@ defmodule TinyLfu do
     threshold = trunc(window_size / limit)
     sample_rate = Keyword.get(opts, :sample_rate, 1.0)
 
-    frequencies =
-      Frequencies.new(
-        max_frequency: threshold,
-        max_cardinality: window_size,
-        limit: limit
-      )
+    window_opts = [cardinality: limit, limit: window_size, max_frequency: threshold]
+    windows = Windows.new(window_opts: window_opts)
 
     %__MODULE__{
-      frequencies: frequencies,
+      limit: limit,
       sample_rate: sample_rate,
       threshold: threshold,
-      window: :counters.new(1, []),
-      window_size: window_size
+      windows: windows
     }
   end
 
@@ -37,36 +37,26 @@ defmodule TinyLfu do
   def sample?(lfu, key, _sample), do: add?(lfu, key)
 
   def add?(lfu, key) do
-    :counters.add(lfu.window, 1, 1)
-
-    if :counters.get(lfu.window, 1) == lfu.window_size, do: reset(lfu)
-
-    count = Frequencies.count(lfu.frequencies, key)
+    Windows.increment_current_window(lfu.windows)
+    count = Windows.get_current_window_count(lfu.windows, key)
 
     if count >= lfu.threshold do
       true
     else
-      min_count = Frequencies.min_count(lfu.frequencies)
+      min_count = Windows.get_min_count(lfu.windows)
 
       cond do
         min_count >= lfu.threshold ->
           false
 
         count > min_count ->
-          Frequencies.put(lfu.frequencies, key)
+          Windows.put_in_current_window(lfu.windows, key)
           true
 
         true ->
-          Frequencies.put(lfu.frequencies, key)
+          Windows.put_in_current_window(lfu.windows, key)
           false
       end
     end
-  end
-
-  defp reset(lfu) do
-    :ok = Frequencies.reset(lfu.frequencies)
-    :counters.put(lfu.window, 1, 0)
-
-    :ok
   end
 end

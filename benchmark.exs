@@ -21,7 +21,7 @@ warm = Enum.to_list(51..300)
 cool = Enum.to_list(301..2000)
 cold = Enum.to_list(2001..5000)
 
-number_of_requests = 1_000_000
+number_of_requests = 500_000
 max_request_concurrency = 250
 changes_in_traffic_patterns = 4
 
@@ -36,9 +36,8 @@ inputs = 1..number_of_requests
 end)
 
 starting_memory = :persistent_term.info().memory
-:persistent_term.put(:lfu, TinyLfu.new(limit: cache_size, sample_rate: 0.01))
 
-stream_wo_lfu = Task.async_stream(inputs, fn (input) ->
+wo_lfu = fn (input) ->
   case Cachex.get(:cache_wo_lfu, input) do
     {:ok, true} ->
       Cachex.put(:cache_wo_lfu, input, true)
@@ -48,20 +47,23 @@ stream_wo_lfu = Task.async_stream(inputs, fn (input) ->
       Cachex.put(:cache_wo_lfu, input, true)
       :ets.update_counter(hit_rate_wo_lfu, :miss, 1)
   end
-end, max_concurrency: max_request_concurrency)
+end
 
-stream_w_lfu = Task.async_stream(inputs, fn (input) ->
+lfu = TinyLfu.new(limit: cache_size)
+w_lfu = fn (input) ->
   case Cachex.get(:cache_w_lfu, input) do
     {:ok, true} ->
       :ets.update_counter(hit_rate_w_lfu, :hit, 1)
 
-    {:ok, nil} ->
-      :ets.update_counter(hit_rate_w_lfu, :miss, 1)
-  end
+      {:ok, nil} ->
+        :ets.update_counter(hit_rate_w_lfu, :miss, 1)
+      end
 
-  lfu = :persistent_term.get(:lfu)
-  if TinyLfu.sample?(lfu, input), do: Cachex.put(:cache_w_lfu, input, true)
-end, max_concurrency: max_request_concurrency)
+      if TinyLfu.sample?(lfu, input), do: Cachex.put(:cache_w_lfu, input, true)
+    end
+
+stream_w_lfu = Task.async_stream(inputs, w_lfu, max_concurrency: max_request_concurrency)
+stream_wo_lfu = Task.async_stream(inputs, wo_lfu, max_concurrency: max_request_concurrency)
 
 {time_w_lfu, :ok} = :timer.tc(Stream, :run, [stream_w_lfu])
 {time_wo_lfu, :ok} = :timer.tc(Stream, :run, [stream_wo_lfu])
@@ -79,3 +81,13 @@ IO.inspect time_w_lfu/1_000_000, label: "Time With LFU [Seconds]"
 IO.inspect time_wo_lfu/1_000_000, label: "Time Without LFU [Seconds]"
 IO.inspect (hits_w_lfu/(hits_w_lfu + misses_w_lfu)) * 100, label: "LRW Cache With LFU Hit Rate [%]"
 IO.inspect (hits_wo_lfu/(hits_wo_lfu + misses_wo_lfu)) * 100, label: "LRW Cache Without LFU Hit Rate [%]"
+
+times = Enum.map(0..10_000, fn(_) ->
+  input = Enum.random(0..25)
+  {time, _} = :timer.tc(TinyLfu, :add?, [lfu, input])
+  time/1000
+end)
+
+IO.inspect Enum.max(times), label: "Max time to add? [ms]"
+IO.inspect Enum.min(times), label: "Min time to add? [ms]"
+IO.inspect Enum.sum(times)/length(times), label: "Average time to add? [ms]"
