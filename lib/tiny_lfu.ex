@@ -14,7 +14,7 @@ defmodule TinyLfu do
 
   def new(opts \\ []) do
     limit = trunc(Keyword.get(opts, :limit, 50))
-    window_size = trunc(Keyword.get(opts, :window_size, 500))
+    window_size = trunc(Keyword.get(opts, :window_size, 1_000))
     threshold = trunc(window_size / limit)
     sample_rate = Keyword.get(opts, :sample_rate, 1.0)
 

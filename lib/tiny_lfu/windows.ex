@@ -21,9 +21,9 @@ defmodule TinyLfu.Windows do
 
   def get_current_window(windows) do
     current_window = current_window(windows)
-    Window.increment(current_window)
+    window_size = Window.increment(current_window)
 
-    if Window.full?(current_window), do: rotate(windows), else: current_window
+    if window_size == Window.limit(current_window), do: rotate(windows), else: current_window
   end
 
   def put_in_window(windows, key, window \\ nil) do

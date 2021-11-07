@@ -18,7 +18,7 @@ defmodule TinyLfu.Windows.Window do
       bloom_filter: CountingBloomFilter.new(limit, counters_bit_size: 16),
       cardinality: cardinality,
       index: index,
-      state: :counters.new(length(Map.keys(@state)), [:write_concurrency]),
+      state: :atomics.new(length(Map.keys(@state)), []),
       frequency_counter: :counters.new(max_frequency, [:write_concurrency]),
       limit: limit
     }
@@ -27,6 +27,8 @@ defmodule TinyLfu.Windows.Window do
   def count(window, key), do: CountingBloomFilter.count(window.bloom_filter, key)
 
   def index(window), do: window.index
+
+  def limit(window), do: window.limit
 
   def put(window, key) do
     CountingBloomFilter.put(window.bloom_filter, key)
@@ -38,20 +40,16 @@ defmodule TinyLfu.Windows.Window do
 
   def set_state(window, state) do
     for {k, v} <- state do
-      :counters.put(window.state, @state[k], v)
+      :atomics.put(window.state, @state[k], v)
     end
   end
 
-  def full?(window) do
-    :counters.get(window.state, @state.size) >= window.limit
-  end
-
   def increment(window) do
-    :counters.add(window.state, @state.size, 1)
+    :atomics.add_get(window.state, @state.size, 1)
   end
 
   def min_count(window) do
-    initial_min_count = :counters.get(window.state, @state.min_count)
+    initial_min_count = :atomics.get(window.state, @state.min_count)
 
     running_count =
       0..:counters.info(window.frequency_counter).size
